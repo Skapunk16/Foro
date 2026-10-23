@@ -7,6 +7,27 @@ function getAuthHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+async function parseResponse<T = any>(res: Response): Promise<T> {
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(text || `Error en el servidor (${res.status})`);
+    }
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(`Respuesta no válida del servidor: ${text.slice(0, 100)}`);
+    }
+  }
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Error en la petición (${res.status})`);
+  }
+  return data as T;
+}
+
 export const api = {
   // Auth
   async login(identifier: string, password: string): Promise<{ user: User; token: string }> {
@@ -15,8 +36,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier, password }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al iniciar sesión');
+    const data = await parseResponse<{ user: User; token: string }>(res);
     localStorage.setItem('comuniland_token', data.token);
     return data;
   },
@@ -33,8 +53,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al registrar usuario');
+    const data = await parseResponse<{ user: User; token: string }>(res);
     localStorage.setItem('comuniland_token', data.token);
     return data;
   },
@@ -51,7 +70,7 @@ export const api = {
         localStorage.removeItem('comuniland_token');
         return null;
       }
-      return await res.json();
+      return await parseResponse<{ user: User }>(res);
     } catch {
       return null;
     }
@@ -66,9 +85,7 @@ export const api = {
       },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al actualizar perfil');
-    return data;
+    return await parseResponse<{ user: User }>(res);
   },
 
   async changePassword(currentPassword: string, newPassword: string): Promise<{ message: string; user: User }> {
@@ -80,9 +97,7 @@ export const api = {
       },
       body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al cambiar contraseña');
-    return data;
+    return await parseResponse<{ message: string; user: User }>(res);
   },
 
   logout(): void {
@@ -91,9 +106,14 @@ export const api = {
 
   // Categories & Threads
   async getCategories(): Promise<Category[]> {
-    const res = await fetch(`${API_BASE}/categories`);
-    const data = await res.json();
-    return data.categories || [];
+    try {
+      const res = await fetch(`${API_BASE}/categories`);
+      const data = await parseResponse<{ categories: Category[] }>(res);
+      return data.categories || [];
+    } catch (err) {
+      console.warn('Error loading categories:', err);
+      return [];
+    }
   },
 
   async getThreads(params?: { category?: string | number; search?: string; sort?: string }): Promise<Thread[]> {
@@ -103,15 +123,13 @@ export const api = {
     if (params?.sort) query.append('sort', params.sort);
 
     const res = await fetch(`${API_BASE}/threads?${query.toString()}`);
-    const data = await res.json();
+    const data = await parseResponse<{ threads: Thread[] }>(res);
     return data.threads || [];
   },
 
   async getThread(id: number): Promise<{ thread: Thread; posts: Post[] }> {
     const res = await fetch(`${API_BASE}/threads/${id}`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al cargar el hilo');
-    return data;
+    return await parseResponse<{ thread: Thread; posts: Post[] }>(res);
   },
 
   async createThread(payload: {
@@ -129,9 +147,7 @@ export const api = {
       },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al crear hilo');
-    return data;
+    return await parseResponse<{ message: string; threadId: number }>(res);
   },
 
   async deleteThread(id: number): Promise<void> {
@@ -139,10 +155,7 @@ export const api = {
       method: 'DELETE',
       headers: getAuthHeader(),
     });
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || 'Error al eliminar hilo');
-    }
+    await parseResponse<{ message: string }>(res);
   },
 
   // Posts
@@ -158,9 +171,7 @@ export const api = {
       },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al publicar comentario');
-    return data;
+    return await parseResponse<{ message: string; post: Post }>(res);
   },
 
   async deletePost(id: number): Promise<void> {
@@ -168,10 +179,7 @@ export const api = {
       method: 'DELETE',
       headers: getAuthHeader(),
     });
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || 'Error al eliminar comentario');
-    }
+    await parseResponse<{ message: string }>(res);
   },
 
   // Upload
@@ -184,16 +192,13 @@ export const api = {
       headers: getAuthHeader(),
       body: formData,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al subir archivo');
+    const data = await parseResponse<{ message: string; file: any }>(res);
     return data.file;
   },
 
   // Link preview
   async previewLink(url: string): Promise<LinkPreview> {
     const res = await fetch(`${API_BASE}/links/preview?url=${encodeURIComponent(url)}`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al obtener vista previa');
-    return data;
+    return await parseResponse<LinkPreview>(res);
   },
 };

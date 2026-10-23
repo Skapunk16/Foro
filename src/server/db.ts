@@ -8,41 +8,62 @@ const DATA_DIR = isVercel ? '/tmp/data' : path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'forum.sqlite');
 
 let dbInstance: Database | null = null;
+let dbInitPromise: Promise<Database> | null = null;
 
 export async function getDb(): Promise<Database> {
   if (dbInstance) return dbInstance;
+  if (dbInitPromise) return dbInitPromise;
 
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  const SQL = await initSqlJs();
-
-  if (fs.existsSync(DB_FILE)) {
+  dbInitPromise = (async () => {
     try {
-      const fileBuffer = fs.readFileSync(DB_FILE);
-      dbInstance = new SQL.Database(fileBuffer);
-    } catch (err) {
-      console.warn('Error reading existing SQLite database, creating fresh one:', err);
-      dbInstance = new SQL.Database();
-    }
-  } else {
-    dbInstance = new SQL.Database();
-  }
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
 
-  initializeSchema(dbInstance);
-  saveDb();
-  return dbInstance;
+      const localWasm = path.resolve(process.cwd(), 'node_modules/sql.js/dist/sql-wasm.wasm');
+      const SQL = await initSqlJs({
+        locateFile: (file) => {
+          if (fs.existsSync(localWasm)) return localWasm;
+          return `https://sql.js.org/dist/${file}`;
+        },
+      });
+
+      if (fs.existsSync(DB_FILE)) {
+        try {
+          const fileBuffer = fs.readFileSync(DB_FILE);
+          dbInstance = new SQL.Database(fileBuffer);
+        } catch (err) {
+          console.warn('Error reading existing SQLite database, creating fresh one:', err);
+          dbInstance = new SQL.Database();
+        }
+      } else {
+        dbInstance = new SQL.Database();
+      }
+
+      initializeSchema(dbInstance);
+      saveDb();
+      return dbInstance;
+    } catch (err) {
+      console.error('Error initializing SQLite database:', err);
+      dbInitPromise = null;
+      throw err;
+    }
+  })();
+
+  return dbInitPromise;
 }
 
 export function saveDb(): void {
   if (!dbInstance) return;
   try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
     const data = dbInstance.export();
     const buffer = Buffer.from(data);
     fs.writeFileSync(DB_FILE, buffer);
   } catch (err) {
-    console.error('Failed to persist SQLite database to disk:', err);
+    console.warn('Warning: Could not persist SQLite database to disk:', err);
   }
 }
 
