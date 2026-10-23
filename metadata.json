@@ -1,0 +1,6 @@
+{
+  "name": "Comuniland - Foro Comunitario Ligero",
+  "description": "Plataforma de foro comunitario full-stack con autenticación local, hilos de discusión categorizados, respuestas, vista previa de enlaces y subida de archivos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
